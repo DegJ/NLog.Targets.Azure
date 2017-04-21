@@ -14,7 +14,7 @@ NLog targets to Azure Table Storage
   </extensions>
   <targets>
     <target xsi:type="AsyncWrapper" name="azure" timeToSleepBetweenBatches="30000" batchSize="2147483647" overflowAction="Grow">
-      <target xsi:type="azure" connectionName="NameOfConnectionString" tableName="LogMessage" Period="Month">
+      <target xsi:type="azure" connectionName="NameOfConnectionString" tableName="LogMessage" Period="Month" SplitOnLoggerName="false">
         <property name="LogLevel" value="${level}"/>
         <property name="Message" value="${message}"/>
         <property name="LoggerName" value="${logger}"/>
