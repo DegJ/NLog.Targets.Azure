@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using AzureStorageExtensions;
@@ -18,6 +19,7 @@ namespace NLog.Targets
         public Period Period { get; set; }
         public int RemoveAfter { get; set; }
         public bool SortAscending { get; set; }
+        public bool SplitOnLoggerName { get; set; }
 
         readonly List<AzureProperty> _properties = new List<AzureProperty>();
         [ArrayParameter(typeof(AzureProperty), "property")]
@@ -25,7 +27,13 @@ namespace NLog.Targets
         {
             get { return _properties; }   
         }
-        
+
+        readonly ConcurrentDictionary<string, SettingAttribute> _loggerSettings = new ConcurrentDictionary<string, SettingAttribute>();
+
+        public ConcurrentDictionary<string, SettingAttribute> LoggerSettings {
+            get { return _loggerSettings; }
+        }
+
         SettingAttribute _setting;
         CloudClient _client;
         protected override void InitializeTarget()
@@ -44,10 +52,33 @@ namespace NLog.Targets
         {
             try
             {
-                var table = _client.GetGenericCloudTable<LogItem>(_setting.Name, _setting);
                 var key = TimeId.GetTimeId(DateTime.UtcNow, this.SortAscending);
-                var items = logEvents.Select(log => CreateLogItem(key, log.LogEvent));
-                table.BulkInsert(items, true);
+                var items = logEvents.Select(log => CreateLogItem(key, log.LogEvent)).ToArray();
+                if (SplitOnLoggerName)
+                {
+                    foreach (var loggergroup in items.GroupBy(log => log["LoggerName"]))
+                    {
+                        SettingAttribute setting;
+                        if (!LoggerSettings.TryGetValue(loggergroup.Key, out setting))
+                        {
+                            setting = new SettingAttribute
+                            {
+                                Name = this.TableName + loggergroup.Key,
+                                Period = this.Period,
+                                RemoveAfter = this.RemoveAfter
+                            };
+                            LoggerSettings[loggergroup.Key] = setting;
+                        }
+                        var tbl = _client.GetGenericCloudTable<LogItem>(setting.Name, setting);
+                        tbl.BulkInsert(loggergroup, true);
+                    }
+                }
+                else
+                {
+                    var table = _client.GetGenericCloudTable<LogItem>(_setting.Name, _setting);
+                    table.BulkInsert(items, true);
+                }
+                
                 foreach (var info in logEvents)
                     info.Continuation(null);
             }
